@@ -1,85 +1,67 @@
-name: Create Discord Thread from Issue
+name: Create Discord Forum Post from Issue
 
 on:
   issues:
     types: [opened]
 
 jobs:
-  create-discord-thread:
+  create-forum-post:
     runs-on: ubuntu-latest
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Create Discord Thread
+      - name: Create Discord Forum Post
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_FORUM_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         run: |
           # Prepare issue body - escape special characters and make it JSON-safe
           ISSUE_BODY=$(echo '${{ github.event.issue.body }}' | sed 's/"/\\"/g' | sed 's/\n/\\n/g')
           ISSUE_TITLE=$(echo '${{ github.event.issue.title }}' | sed 's/"/\\"/g')
           
-          echo "Creating initial message..."
-          MESSAGE_RESPONSE=$(curl -s -X POST \
+          echo "Creating forum post..."
+          FORUM_POST=$(curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages" \
+            "https://discord.com/api/v10/channels/$DISCORD_FORUM_ID/threads" \
             -d "{
-              \"content\": \"🔔 New GitHub Issue Created\",
-              \"embeds\": [{
-                \"title\": \"$ISSUE_TITLE\",
-                \"url\": \"${{ github.event.issue.html_url }}\",
-                \"description\": \"$ISSUE_BODY\",
-                \"color\": 5814783,
-                \"footer\": {
-                  \"text\": \"GitHub Issue #${{ github.event.issue.number }}\"
-                }
-              }]
+              \"name\": \"$ISSUE_TITLE\",
+              \"message\": {
+                \"content\": \"🔔 New GitHub Issue Created\",
+                \"embeds\": [{
+                  \"title\": \"$ISSUE_TITLE\",
+                  \"url\": \"${{ github.event.issue.html_url }}\",
+                  \"description\": \"$ISSUE_BODY\",
+                  \"color\": 5814783,
+                  \"footer\": {
+                    \"text\": \"GitHub Issue #${{ github.event.issue.number }}\"
+                  }
+                }]
+              },
+              \"applied_tags\": [],
+              \"auto_archive_duration\": 1440
             }")
           
-          # Check if message was created successfully
-          if ! echo "$MESSAGE_RESPONSE" | jq -e '.id' > /dev/null; then
-            echo "Failed to create message:"
-            echo "$MESSAGE_RESPONSE" | jq '.'
+          # Check if forum post was created successfully
+          if ! echo "$FORUM_POST" | jq -e '.id' > /dev/null; then
+            echo "Failed to create forum post:"
+            echo "$FORUM_POST" | jq '.'
             exit 1
           fi
           
-          # Get message ID
-          MESSAGE_ID=$(echo "$MESSAGE_RESPONSE" | jq -r '.id')
-          echo "Message created with ID: $MESSAGE_ID"
+          # Get forum post ID
+          THREAD_ID=$(echo "$FORUM_POST" | jq -r '.id')
+          echo "Forum post created with ID: $THREAD_ID"
           
-          # Create thread
-          echo "Creating thread..."
-          THREAD_RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages/$MESSAGE_ID/threads" \
-            -d "{
-              \"name\": \"Issue: $ISSUE_TITLE\",
-              \"auto_archive_duration\": 1440,
-              \"type\": 11
-            }")
-          
-          # Check if thread was created successfully
-          if ! echo "$THREAD_RESPONSE" | jq -e '.id' > /dev/null; then
-            echo "Failed to create thread:"
-            echo "$THREAD_RESPONSE" | jq '.'
-            exit 1
-          fi
-          
-          # Get thread ID
-          THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id')
-          echo "Thread created with ID: $THREAD_ID"
-          
-          # Send initial thread message
-          echo "Sending initial thread message..."
+          # Send additional details as a follow-up message
+          echo "Sending additional details..."
           curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
             "https://discord.com/api/v10/channels/$THREAD_ID/messages" \
             -d "{
-              \"content\": \"**Issue Details:**\n• Created by: @${{ github.event.issue.user.login }}\n• Repository: ${{ github.repository }}\n• Link: ${{ github.event.issue.html_url }}\n\nUse this thread for discussion and updates about this issue.\"
+              \"content\": \"**Issue Details:**\n• Created by: @${{ github.event.issue.user.login }}\n• Repository: ${{ github.repository }}\n• Link: ${{ github.event.issue.html_url }}\n\nUse this forum post for discussion and updates about this issue.\"
             }"
 
       - name: Update Issue with Discord Link
@@ -93,5 +75,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issue.number,
-              body: `✨ Discord thread created in <#${{ env.DISCORD_CHANNEL_ID }}>`
+              body: `✨ Discord forum post created in <#${{ env.DISCORD_FORUM_ID }}>`
             });
