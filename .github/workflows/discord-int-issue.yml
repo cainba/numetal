@@ -16,30 +16,82 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         run: |
-          # Create initial message
+          # Prepare issue body - escape special characters and make it JSON-safe
+          ISSUE_BODY=$(echo '${{ github.event.issue.body }}' | sed 's/"/\\"/g' | sed 's/\n/\\n/g')
+          ISSUE_TITLE=$(echo '${{ github.event.issue.title }}' | sed 's/"/\\"/g')
+          
+          echo "Creating initial message..."
           MESSAGE_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
             "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages" \
             -d "{
-              \"content\": \"New Issue: ${{ github.event.issue.title }}\",
+              \"content\": \"🔔 New GitHub Issue Created\",
               \"embeds\": [{
-                \"title\": \"${{ github.event.issue.title }}\",
+                \"title\": \"$ISSUE_TITLE\",
                 \"url\": \"${{ github.event.issue.html_url }}\",
-                \"description\": \"${ISSUE_BODY:0:2000}\",
-                \"color\": 5814783
+                \"description\": \"$ISSUE_BODY\",
+                \"color\": 5814783,
+                \"footer\": {
+                  \"text\": \"GitHub Issue #${{ github.event.issue.number }}\"
+                }
               }]
             }")
           
+          # Check if message was created successfully
+          if ! echo "$MESSAGE_RESPONSE" | jq -e '.id' > /dev/null; then
+            echo "Failed to create message:"
+            echo "$MESSAGE_RESPONSE" | jq '.'
+            exit 1
+          fi
+          
           # Get message ID
           MESSAGE_ID=$(echo "$MESSAGE_RESPONSE" | jq -r '.id')
+          echo "Message created with ID: $MESSAGE_ID"
           
           # Create thread
+          echo "Creating thread..."
           THREAD_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
             "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages/$MESSAGE_ID/threads" \
             -d "{
-              \"name\": \"${ISSUE_TITLE:0:100}\",
-              \"auto_archive_duration\": 1440
+              \"name\": \"Issue: $ISSUE_TITLE\",
+              \"auto_archive_duration\": 1440,
+              \"type\": 11
             }")
+          
+          # Check if thread was created successfully
+          if ! echo "$THREAD_RESPONSE" | jq -e '.id' > /dev/null; then
+            echo "Failed to create thread:"
+            echo "$THREAD_RESPONSE" | jq '.'
+            exit 1
+          fi
+          
+          # Get thread ID
+          THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id')
+          echo "Thread created with ID: $THREAD_ID"
+          
+          # Send initial thread message
+          echo "Sending initial thread message..."
+          curl -s -X POST \
+            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://discord.com/api/v10/channels/$THREAD_ID/messages" \
+            -d "{
+              \"content\": \"**Issue Details:**\n• Created by: @${{ github.event.issue.user.login }}\n• Repository: ${{ github.repository }}\n• Link: ${{ github.event.issue.html_url }}\n\nUse this thread for discussion and updates about this issue.\"
+            }"
+
+      - name: Update Issue with Discord Link
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: `✨ Discord thread created in <#${{ env.DISCORD_CHANNEL_ID }}>`
+            });
