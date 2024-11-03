@@ -9,117 +9,37 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check if issue is in project
-        id: check-project
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const issue = context.payload.issue;
-            
-            const query = `
-              query($owner: String!, $repo: String!, $number: Int!) {
-                repository(owner: $owner, name: $repo) {
-                  issue(number: $number) {
-                    projectItems(first: 1) {
-                      nodes {
-                        project {
-                          id
-                          title
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            `;
-            
-            const variables = {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              number: issue.number
-            };
-            
-            const result = await github.graphql(query, variables);
-            const projectItems = result.repository.issue.projectItems.nodes;
-            
-            if (projectItems.length > 0) {
-              core.setOutput('in-project', 'true');
-              core.setOutput('project-title', projectItems[0].project.title);
-            } else {
-              core.setOutput('in-project', 'false');
-            }
-
+      - uses: actions/checkout@v4
+      
       - name: Create Discord Thread
-        if: steps.check-project.outputs.in-project == 'true'
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         run: |
-          # Prepare the message content
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_URL="${{ github.event.issue.html_url }}"
-          ISSUE_BODY="${{ github.event.issue.body }}"
-          PROJECT_TITLE="${{ steps.check-project.outputs.project-title }}"
-          
+          # Create initial message
           MESSAGE_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
             "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages" \
             -d "{
-              \"content\": \"New Issue in Project: $PROJECT_TITLE\",
+              \"content\": \"New Issue: ${{ github.event.issue.title }}\",
               \"embeds\": [{
-                \"title\": \"$ISSUE_TITLE\",
-                \"url\": \"$ISSUE_URL\",
+                \"title\": \"${{ github.event.issue.title }}\",
+                \"url\": \"${{ github.event.issue.html_url }}\",
                 \"description\": \"${ISSUE_BODY:0:2000}\",
-                \"color\": 5814783,
-                \"footer\": {
-                  \"text\": \"GitHub Issue #${{ github.event.issue.number }}\"
-                }
+                \"color\": 5814783
               }]
             }")
           
+          # Get message ID
           MESSAGE_ID=$(echo "$MESSAGE_RESPONSE" | jq -r '.id')
-
+          
+          # Create thread
           THREAD_RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
             -H "Content-Type: application/json" \
             "https://discord.com/api/v10/channels/$DISCORD_CHANNEL_ID/messages/$MESSAGE_ID/threads" \
             -d "{
               \"name\": \"${ISSUE_TITLE:0:100}\",
-              \"auto_archive_duration\": 1440,
-              \"type\": 11
+              \"auto_archive_duration\": 1440
             }")
-
-          THREAD_ID=$(echo "$THREAD_RESPONSE" | jq -r '.id')
-
-          curl -s -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
-            -d "{
-              \"body\": \"📌 Discord thread created! Thread ID: \`$THREAD_ID\`\"
-            }"
-
-      - name: Add Initial Thread Message
-        if: steps.check-project.outputs.in-project == 'true'
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-        run: |
-          THREAD_ID=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
-            | jq -r '.[] | select(.body | contains("Discord thread created!")) | .body' \
-            | grep -o '[0-9]\+')
-
-          curl -s -X POST \
-            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://discord.com/api/v10/channels/$THREAD_ID/messages" \
-            -d "{
-              \"content\": \"**Issue Links and Resources:**\n• GitHub Issue: ${{ github.event.issue.html_url }}\n• Project: ${{ steps.check-project.outputs.project-title }}\n• Repository: ${{ github.repository }}\n\nUse this thread for discussion and updates about this issue.\"
-            }"
