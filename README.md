@@ -7,7 +7,7 @@ The aim here is to have a searchable site that contains a page for each band/mem
 
 <h2>Take a look at contributing</h2>
 
-<a href="https://github.com/cainba/numetal/.github/CONTRIBUTING.md">-->CONTRIBUTING.md<--</a>
+<a href="https://github.com/cainba/numetal/blob/master/.github/CONTRIBUTING.md">-->CONTRIBUTING.md<--</a>
 
 ![contributing md exmaple image](.github/resources/images/contributing_example.png)
 </center>
